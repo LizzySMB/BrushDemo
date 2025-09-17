@@ -18,6 +18,10 @@ public:
     bool saveImageToFile(const QString &file);
     void displayImage();
     void resize(int w, int h);
+    int row_col_to_ind(int row, int col);
+    std::array<int, 2> ind_to_row_col(int ind);
+    bool in_bounds(int x, int y);
+    void calibrate_mask(int x, int y);
 
     // This will be called when the settings have changed
     void settingsChanged();
@@ -50,6 +54,7 @@ private:
     }
 
     // TODO: add any member variables or functions you need
+    bool m_isDown;
 };
 
 #endif // CANVAS2D_H

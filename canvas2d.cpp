@@ -5,6 +5,7 @@
 #include <iostream>
 #include "settings.h"
 
+
 /**
  * @brief Initializes new 500x500 canvas
  */
@@ -107,6 +108,7 @@ void Canvas2D::settingsChanged() {
     settings.saveSettings();
 
     // TODO: fill in what you need to do when brush or filter parameters change
+    settings.loadSettingsOrDefaults();
 }
 
 /**
@@ -114,12 +116,114 @@ void Canvas2D::settingsChanged() {
  */
 void Canvas2D::mouseDown(int x, int y) {
     // Brush TODO
+    m_isDown = true;
+    if (in_bounds(x,y)) {
+        calibrate_mask(x,y);
+    }
+    displayImage();
 }
 
 void Canvas2D::mouseDragged(int x, int y) {
     // Brush TODO
+    if (m_isDown && in_bounds(x,y)) {
+        calibrate_mask(x,y);
+        displayImage();
+    }
 }
 
 void Canvas2D::mouseUp(int x, int y) {
     // Brush TODO
+    m_isDown = false;
+    displayImage();
 }
+
+int Canvas2D::row_col_to_ind(int col, int row) {
+    return m_width * row + col;
+}
+
+std::array<int, 2> Canvas2D::ind_to_row_col(int ind) {
+    return {ind/m_width, ind % m_width};
+}
+
+/**
+ * @brief Canvas2D::in_bounds helper method to check if a coordinate is in bounds of the canvas
+ * @param x
+ * @param y
+ * @return True if the coordinates are in bounds, false otherwise
+ */
+bool Canvas2D::in_bounds(int x, int y) {
+    return (x > 0 && x < m_width && y > 0 && y < m_height);
+}
+
+RGBA merge_colors(RGBA &prev, RGBA &new_val, float opacity) {
+    float alpha = new_val.a/255.0;
+    opacity = opacity * alpha;
+    float merged_opacity = 1.0 - opacity;
+
+    return {
+        (std::uint8_t)(new_val.r * opacity + prev.r * merged_opacity),
+        (std::uint8_t)(new_val.g * opacity + prev.g * merged_opacity),
+        (std::uint8_t)(new_val.b * opacity + prev.b * merged_opacity),
+        new_val.a
+    };
+}
+
+//circle equation (x - cx)^2 + (y - cy)^2 = r^2, going until r^2
+void Canvas2D::calibrate_mask(int cx, int cy) {
+    int r = settings.brushRadius;
+    if (settings.brushType == BRUSH_CONSTANT) {
+        for (int y = cy - r; y <= cy + r; ++y) {
+            for (int x = cx - r; x <= cx + r; ++x) {
+                int dx = x - cx;
+                int dy = y - cy;
+                if (dx * dx + dy * dy <= r * r && in_bounds(x, y)) {
+                    RGBA prev_color = m_data[row_col_to_ind(x, y)];
+                    RGBA new_color = settings.brushColor;
+                    m_data[row_col_to_ind(x,y)] = merge_colors(prev_color, new_color, 1);
+                }
+            }
+        }
+    }
+
+    if (settings.brushType == BRUSH_LINEAR) {
+        for (int y = cy - r; y <= cy + r; ++y) {
+            for (int x = cx - r; x <= cx + r; ++x) {
+                int dx = x - cx;
+                int dy = y - cy;
+                if (dx * dx + dy * dy <= r * r && in_bounds(x, y)) {
+                    int r_sqr = dx * dx + dy * dy;
+                    float dist = std::sqrt(r_sqr);
+
+                    //linear decrement from 100% opacity
+                    float opacity = 1.0 - dist/r;
+                    RGBA prev_color = m_data[row_col_to_ind(x, y)];
+                    RGBA new_color = settings.brushColor;
+
+                    m_data[row_col_to_ind(x, y)] = merge_colors(prev_color, new_color, opacity);
+                }
+            }
+        }
+    }
+
+    if (settings.brushType == BRUSH_QUADRATIC) {
+        for (int y = cy - r; y <= cy + r; ++y) {
+            for (int x = cx - r; x <= cx + r; ++x) {
+                int dx = x - cx;
+                int dy = y - cy;
+                if (dx * dx + dy * dy <= r * r && in_bounds(x, y)) {
+                    int r_sqr = dx * dx + dy * dy;
+                    float dist = std::sqrt(r_sqr);
+
+                    //quadratic decrement from 100% opacity: C = 1, A = 1/r, B = -1/r
+                    float opacity = 1.0 - (2 * dist)/r + (dist*dist)/(r*r);
+                    RGBA prev_color = m_data[row_col_to_ind(x, y)];
+                    RGBA new_color = settings.brushColor;
+
+                    m_data[row_col_to_ind(x, y)] = merge_colors(prev_color, new_color, opacity);
+                }
+            }
+        }
+    }
+}
+
+
