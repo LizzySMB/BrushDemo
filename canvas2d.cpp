@@ -121,10 +121,10 @@ void Canvas2D::settingsChanged() {
 void Canvas2D::mouseDown(int x, int y) {
     // Brush TODO
     m_isDown = true;
-    if (in_bounds(x,y) && settings.brushType != BRUSH_SMUDGE) {
+    if (in_bounds(x,y) && settings.brushType != BRUSH_SMUDGE && settings.brushRadius != 0) {
         calibrate_mask(x,y);
     }
-    else if (settings.brushType == BRUSH_SMUDGE && in_bounds(x,y)) {
+    else if (settings.brushType == BRUSH_SMUDGE && in_bounds(x,y) && settings.brushRadius != 0) {
         next_smudge_val.clear();
         int r = settings.brushRadius;
         for (int dy = -r; dy <= r; ++dy) {
@@ -142,7 +142,7 @@ void Canvas2D::mouseDown(int x, int y) {
 
 void Canvas2D::mouseDragged(int x, int y) {
     // Brush TODO
-    if (m_isDown && in_bounds(x,y)) {
+    if (m_isDown && in_bounds(x,y) && settings.brushRadius != 0 && settings.brushType != BRUSH_FILL) {
         calibrate_mask(x,y);
         displayImage();
     }
@@ -176,6 +176,13 @@ bool Canvas2D::in_bounds(int x, int y) {
     return (x > 0 && x < m_width && y > 0 && y < m_height);
 }
 
+/**
+ * @brief merge_colors method to blend colors already on canvas with new colors (relevant for linear, quadratic, and low-alpha strokes)
+ * @param prev - value already on canvas
+ * @param new_val - current brush color
+ * @param opacity - opacity of current brush/its pixel at this location
+ * @return
+ */
 RGBA merge_colors(RGBA &prev, RGBA &new_val, float opacity) {
     float alpha = new_val.a/255.0f;
     opacity = opacity * alpha;
@@ -190,10 +197,16 @@ RGBA merge_colors(RGBA &prev, RGBA &new_val, float opacity) {
 }
 
 
-//circle equation (x - cx)^2 + (y - cy)^2 = r^2, going until r^2
+/**
+ * @brief Canvas2D::calibrate_mask method called when the mouse is down/dragged to add the brush dot/stroke there based on
+ * radius and brush type set
+ * @param cx - brush x centerpoint
+ * @param cy - brush y centerpoint
+ */
 void Canvas2D::calibrate_mask(int cx, int cy) {
     int r = settings.brushRadius;
     if (settings.brushType == BRUSH_CONSTANT) {
+        //circle equation (x - cx)^2 + (y - cy)^2 = r^2, going until r^2
         for (int y = cy - r; y <= cy + r; ++y) {
             for (int x = cx - r; x <= cx + r; ++x) {
                 int dx = x - cx;
@@ -261,6 +274,7 @@ void Canvas2D::calibrate_mask(int cx, int cy) {
                 if (dx * dx + dy * dy <= r * r && in_bounds(x, y)) {
                     float dist = std::sqrt(dx * dx + dy * dy);
 
+                    //quadratic here as well
                     float opacity = 1.0f - (2 * dist)/r + (dist*dist)/(r*r);
 
                     if (i < next_smudge_val.size()) {
@@ -291,9 +305,9 @@ void Canvas2D::calibrate_mask(int cx, int cy) {
 
     if (settings.brushType == BRUSH_SPRAY) {
         float probability = settings.brushDensity/100.0;
-        //looked up c++ random library tool
-        std::random_device rd;
-        std::mt19937 gen(rd());
+        //looked up c++ random library tool--didn't copy the code, just using the types
+        std::random_device rand;
+        std::mt19937 gen(rand());
         std::uniform_real_distribution<> rand_distrib(0.0,1.0);
         for (int y = cy - r; y <= cy + r; ++y) {
             for (int x = cx - r; x <= cx + r; ++x) {
