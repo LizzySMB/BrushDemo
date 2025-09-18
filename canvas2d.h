@@ -19,7 +19,6 @@ public:
     void displayImage();
     void resize(int w, int h);
     int row_col_to_ind(int row, int col);
-    std::array<int, 2> ind_to_row_col(int ind);
     bool in_bounds(int x, int y);
     void calibrate_mask(int x, int y);
 

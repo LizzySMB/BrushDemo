@@ -7,6 +7,7 @@
 #include <random>
 
 std::vector<RGBA> next_smudge_val;
+std::vector<bool> visited; //for fill tool to save memory
 
 /**
  * @brief Initializes new 500x500 canvas
@@ -142,8 +143,8 @@ void Canvas2D::mouseDown(int x, int y) {
 void Canvas2D::mouseDragged(int x, int y) {
     // Brush TODO
     if (m_isDown && in_bounds(x,y)) {
-            calibrate_mask(x,y);
-            displayImage();
+        calibrate_mask(x,y);
+        displayImage();
     }
 }
 
@@ -154,12 +155,15 @@ void Canvas2D::mouseUp(int x, int y) {
     displayImage();
 }
 
+
+/**
+ * @brief Canvas2D::row_col_to_ind Helper method for the many x, y to index conversions
+ * @param col
+ * @param row
+ * @return the index form of a canvas coordinate
+ */
 int Canvas2D::row_col_to_ind(int col, int row) {
     return m_width * row + col;
-}
-
-std::array<int, 2> Canvas2D::ind_to_row_col(int ind) {
-    return {ind/m_width, ind % m_width};
 }
 
 /**
@@ -184,6 +188,7 @@ RGBA merge_colors(RGBA &prev, RGBA &new_val, float opacity) {
         new_val.a
     };
 }
+
 
 //circle equation (x - cx)^2 + (y - cy)^2 = r^2, going until r^2
 void Canvas2D::calibrate_mask(int cx, int cy) {
@@ -236,11 +241,9 @@ void Canvas2D::calibrate_mask(int cx, int cy) {
                     //quadratic decrement from 100% opacity: C = 1, A = 1/r, B = -1/r
                     float opacity = 1.0f - (2 * dist)/r + (dist*dist)/(r*r);
 
-                    if (settings.brushType == BRUSH_QUADRATIC) {
-                        prev_color = m_data[row_col_to_ind(x, y)];
-                        new_color = m_data[row_col_to_ind(x, y)];
-                        m_data[row_col_to_ind(x, y)] = merge_colors(prev_color, new_color, opacity);
-                    }
+                    prev_color = m_data[row_col_to_ind(x, y)];
+                    new_color = settings.brushColor;
+                    m_data[row_col_to_ind(x, y)] = merge_colors(prev_color, new_color, opacity);
                 }
             }
         }
@@ -258,19 +261,12 @@ void Canvas2D::calibrate_mask(int cx, int cy) {
                 if (dx * dx + dy * dy <= r * r && in_bounds(x, y)) {
                     float dist = std::sqrt(dx * dx + dy * dy);
 
-                    float opacity = 0;
-
-                    if (dx == 0 && dy == 0) {
-                        opacity = 1.0f;
-                    }
-                    else if (dist/r < 1.0f) {
-                        opacity = 1.0f - (2 * dist)/r + (dist*dist)/(r*r);
-                    }
+                    float opacity = 1.0f - (2 * dist)/r + (dist*dist)/(r*r);
 
                     if (i < next_smudge_val.size()) {
-                        RGBA& dst = m_data[row_col_to_ind(x, y)];
+                        RGBA& curr = m_data[row_col_to_ind(x, y)];
                         RGBA& smudge_color = next_smudge_val[i];
-                        dst = merge_colors(dst, smudge_color, opacity);
+                        curr = merge_colors(curr, smudge_color, opacity);
                     }
                 }
                 ++i;
@@ -309,6 +305,46 @@ void Canvas2D::calibrate_mask(int cx, int cy) {
                     m_data[row_col_to_ind(x,y)] = merge_colors(prev_color, new_color, 1);
                 }
             }
+        }
+    }
+
+    if (settings.brushType == BRUSH_FILL) {
+        //checking if color is already there
+        RGBA targetColor = m_data[row_col_to_ind(cx, cy)];
+        if (targetColor.r == settings.brushColor.r &&
+            targetColor.g == settings.brushColor.g &&
+            targetColor.b == settings.brushColor.b &&
+            targetColor.a == settings.brushColor.a) {
+            return;
+        }
+
+        std::queue<std::pair<int, int>> q;
+        q.push({cx, cy});
+        visited = std::vector<bool>(m_width * m_height, false);
+
+
+        while (!q.empty()) {
+            auto [x, y] = q.front();
+            q.pop();
+
+            int index = row_col_to_ind(x, y);
+            if (visited[index]) continue;
+
+            RGBA current = m_data[index];
+
+            if (!((int)targetColor.r == (int)current.r && (int)targetColor.g == (int)current.g
+                                                                                       && (int)targetColor.b == (int)current.b && (int)targetColor.a == (int)current.a)) {
+                continue;
+            }
+
+            m_data[index] = settings.brushColor;
+            visited[index] = true;
+
+            // Adding nearby pixels
+            if (x > 0)         q.push({x - 1, y});
+            if (x < m_width-1) q.push({x + 1, y});
+            if (y > 0)         q.push({x, y - 1});
+            if (y < m_height-1)q.push({x, y + 1});
         }
     }
 }
