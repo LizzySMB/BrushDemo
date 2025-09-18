@@ -4,7 +4,9 @@
 #include <QFileDialog>
 #include <iostream>
 #include "settings.h"
+#include <random>
 
+std::vector<RGBA> next_smudge_val;
 
 /**
  * @brief Initializes new 500x500 canvas
@@ -98,6 +100,7 @@ void Canvas2D::resize(int w, int h) {
  */
 void Canvas2D::filterImage() {
     // Filter TODO: apply the currently selected filter to the loaded image
+
 }
 
 /**
@@ -117,8 +120,21 @@ void Canvas2D::settingsChanged() {
 void Canvas2D::mouseDown(int x, int y) {
     // Brush TODO
     m_isDown = true;
-    if (in_bounds(x,y)) {
+    if (in_bounds(x,y) && settings.brushType != BRUSH_SMUDGE) {
         calibrate_mask(x,y);
+    }
+    else if (settings.brushType == BRUSH_SMUDGE && in_bounds(x,y)) {
+        next_smudge_val.clear();
+        int r = settings.brushRadius;
+        for (int dy = -r; dy <= r; ++dy) {
+            for (int dx = -r; dx <= r; ++dx) {
+                if (dx*dx + dy*dy <= r*r && in_bounds(x + dx, y + dy)) {
+                    next_smudge_val.push_back(m_data[row_col_to_ind(x + dx, y + dy)]);
+                } else {
+                    next_smudge_val.push_back({255, 255, 255, 255});
+                }
+            }
+        }
     }
     displayImage();
 }
@@ -126,13 +142,14 @@ void Canvas2D::mouseDown(int x, int y) {
 void Canvas2D::mouseDragged(int x, int y) {
     // Brush TODO
     if (m_isDown && in_bounds(x,y)) {
-        calibrate_mask(x,y);
-        displayImage();
+            calibrate_mask(x,y);
+            displayImage();
     }
 }
 
 void Canvas2D::mouseUp(int x, int y) {
     // Brush TODO
+    next_smudge_val.clear();
     m_isDown = false;
     displayImage();
 }
@@ -156,14 +173,14 @@ bool Canvas2D::in_bounds(int x, int y) {
 }
 
 RGBA merge_colors(RGBA &prev, RGBA &new_val, float opacity) {
-    float alpha = new_val.a/255.0;
+    float alpha = new_val.a/255.0f;
     opacity = opacity * alpha;
-    float merged_opacity = 1.0 - opacity;
+    float merged_opacity = 1.0f - opacity;
 
     return {
-        (std::uint8_t)(new_val.r * opacity + prev.r * merged_opacity),
-        (std::uint8_t)(new_val.g * opacity + prev.g * merged_opacity),
-        (std::uint8_t)(new_val.b * opacity + prev.b * merged_opacity),
+        (std::uint8_t)(new_val.r * opacity + prev.r * merged_opacity + 0.5f),
+        (std::uint8_t)(new_val.g * opacity + prev.g * merged_opacity + 0.5f),
+        (std::uint8_t)(new_val.b * opacity + prev.b * merged_opacity + 0.5f),
         new_val.a
     };
 }
@@ -195,7 +212,7 @@ void Canvas2D::calibrate_mask(int cx, int cy) {
                     float dist = std::sqrt(r_sqr);
 
                     //linear decrement from 100% opacity
-                    float opacity = 1.0 - dist/r;
+                    float opacity = 1.0f - dist/r;
                     RGBA prev_color = m_data[row_col_to_ind(x, y)];
                     RGBA new_color = settings.brushColor;
 
@@ -206,6 +223,8 @@ void Canvas2D::calibrate_mask(int cx, int cy) {
     }
 
     if (settings.brushType == BRUSH_QUADRATIC) {
+        RGBA prev_color;
+        RGBA new_color;
         for (int y = cy - r; y <= cy + r; ++y) {
             for (int x = cx - r; x <= cx + r; ++x) {
                 int dx = x - cx;
@@ -215,11 +234,79 @@ void Canvas2D::calibrate_mask(int cx, int cy) {
                     float dist = std::sqrt(r_sqr);
 
                     //quadratic decrement from 100% opacity: C = 1, A = 1/r, B = -1/r
-                    float opacity = 1.0 - (2 * dist)/r + (dist*dist)/(r*r);
+                    float opacity = 1.0f - (2 * dist)/r + (dist*dist)/(r*r);
+
+                    if (settings.brushType == BRUSH_QUADRATIC) {
+                        prev_color = m_data[row_col_to_ind(x, y)];
+                        new_color = m_data[row_col_to_ind(x, y)];
+                        m_data[row_col_to_ind(x, y)] = merge_colors(prev_color, new_color, opacity);
+                    }
+                }
+            }
+        }
+    }
+
+    if (settings.brushType == BRUSH_SMUDGE) {
+        int r = settings.brushRadius;
+        int i = 0;
+
+        for (int dy = -r; dy <= r; ++dy) {
+            for (int dx = -r; dx <= r; ++dx) {
+                int x = cx + dx;
+                int y = cy + dy;
+
+                if (dx * dx + dy * dy <= r * r && in_bounds(x, y)) {
+                    float dist = std::sqrt(dx * dx + dy * dy);
+
+                    float opacity = 0;
+
+                    if (dx == 0 && dy == 0) {
+                        opacity = 1.0f;
+                    }
+                    else if (dist/r < 1.0f) {
+                        opacity = 1.0f - (2 * dist)/r + (dist*dist)/(r*r);
+                    }
+
+                    if (i < next_smudge_val.size()) {
+                        RGBA& dst = m_data[row_col_to_ind(x, y)];
+                        RGBA& smudge_color = next_smudge_val[i];
+                        dst = merge_colors(dst, smudge_color, opacity);
+                    }
+                }
+                ++i;
+            }
+        }
+
+        //"picking up" the new colors
+        next_smudge_val.clear();
+        for (int dy = -r; dy <= r; ++dy) {
+            for (int dx = -r; dx <= r; ++dx) {
+                int x = cx + dx;
+                int y = cy + dy;
+
+                if (dx * dx + dy * dy <= r * r && in_bounds(x, y)) {
+                    next_smudge_val.push_back(m_data[row_col_to_ind(x, y)]);
+                } else {
+                    next_smudge_val.push_back({255, 255, 255, 255});
+                }
+            }
+        }
+    }
+
+    if (settings.brushType == BRUSH_SPRAY) {
+        float probability = settings.brushDensity/100.0;
+        //looked up c++ random library tool
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<> rand_distrib(0.0,1.0);
+        for (int y = cy - r; y <= cy + r; ++y) {
+            for (int x = cx - r; x <= cx + r; ++x) {
+                int dx = x - cx;
+                int dy = y - cy;
+                if (dx * dx + dy * dy <= r * r && in_bounds(x, y) && rand_distrib(gen) < probability) {
                     RGBA prev_color = m_data[row_col_to_ind(x, y)];
                     RGBA new_color = settings.brushColor;
-
-                    m_data[row_col_to_ind(x, y)] = merge_colors(prev_color, new_color, opacity);
+                    m_data[row_col_to_ind(x,y)] = merge_colors(prev_color, new_color, 1);
                 }
             }
         }
